@@ -1,9 +1,10 @@
+import json
 import os
 import re
-import sys
-import json
 import subprocess
-from datetime import datetime
+import sys
+from datetime import datetime, timezone
+
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -30,7 +31,7 @@ def clean_code(raw_text: str) -> str:
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
 
-def resolve_model(client: Groq, requested_model: str = None) -> str:
+def resolve_model(client: Groq, requested_model: str | None = None) -> str:
     """Use an explicit model or choose one currently available to the API key."""
     if requested_model:
         return requested_model
@@ -62,7 +63,8 @@ def execute_sandboxed_code(code: str, timeout: int = 7) -> dict:
             [sys.executable, temp_file],
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            check=False,
         )
         return {
             "success": proc.returncode == 0,
@@ -79,11 +81,11 @@ def execute_sandboxed_code(code: str, timeout: int = 7) -> dict:
             "returncode": -1,
             "error_type": "TimeoutExpired"
         }
-    except Exception as e:
+    except OSError as error:
         return {
             "success": False,
             "stdout": "",
-            "stderr": str(e),
+            "stderr": str(error),
             "returncode": -1,
             "error_type": "ExecutionError"
         }
@@ -107,7 +109,7 @@ def run_agent_loop(task_description: str, max_attempts: int = 3) -> dict:
 
     history_log = {
         "task": task_description,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "attempts": [],
         "passed": False
     }
@@ -155,7 +157,7 @@ def run_agent_loop(task_description: str, max_attempts: int = 3) -> dict:
             print(f"Captured Error:\n{result['stderr']}")
 
             if attempt < max_attempts:
-                print(f"[↻] Feedback piped to agent for self-correction...")
+                print("[↻] Feedback piped to agent for self-correction...")
                 # Append assistant attempt and the user/environment feedback
                 messages.append({"role": "assistant", "content": code})
                 feedback = (
@@ -169,7 +171,9 @@ def run_agent_loop(task_description: str, max_attempts: int = 3) -> dict:
 
     # Save log to logs directory
     os.makedirs("logs", exist_ok=True)
-    log_file = os.path.join("logs", f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+    log_file = os.path.join(
+        "logs", f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
+    )
     with open(log_file, "w", encoding="utf-8") as f:
         json.dump(history_log, f, indent=2)
 
